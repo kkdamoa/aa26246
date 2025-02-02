@@ -27,35 +27,23 @@ jobs:
         
     - name: Setup Chrome and profile
       run: |
-        # 로컬 chrome_profile 확인
         if [ ! -d "chrome_profile" ]; then
-          echo "::error::chrome_profile 폴더가 없습니다. 먼저 로컬에서 프로필을 생성해주세요."
+          echo "::error::chrome_profile 폴더가 필요합니다!"
+          exit 1
+        fi
+        echo "Chrome profile 확인:"
+        ls -la chrome_profile/
+        
+        # 프로필 권한 설정
+        chmod -R 777 chrome_profile
+        
+        # Default 폴더 확인
+        if [ ! -d "chrome_profile/Default" ]; then
+          echo "::error::올바른 크롬 프로필이 아닙니다!"
           exit 1
         fi
         
-        echo "Chrome profile 상태:"
-        ls -la chrome_profile/
-        chmod -R 777 chrome_profile
-
-    - name: Download profile and cookies
-      uses: actions/download-artifact@v4
-      with:
-        name: chrome-data
-        path: ./chrome_data
-      continue-on-error: true
-
-    - name: Setup Chrome environment
-      run: |
-        mkdir -p chrome_profile
-        if [ -d "./chrome_data/chrome_profile" ]; then
-          cp -r ./chrome_data/chrome_profile/* chrome_profile/
-          echo "Chrome profile restored"
-        fi
-        if [ -f "./chrome_data/band_cookies.json" ]; then
-          cp ./chrome_data/band_cookies.json .
-          echo "Cookies restored"
-        fi
-        chmod -R 777 chrome_profile
+        echo "✅ 유효한 크롬 프로필 발견"
 
     - name: Check authentication data
       run: |
@@ -213,6 +201,19 @@ jobs:
 
     - name: Run band poster with auth data
       run: |
+        # 크롬 프로필 재확인
+        if [ ! -d "chrome_profile" ]; then
+          echo "::error::chrome_profile 폴더가 없습니다!"
+          exit 1
+        fi
+        
+        echo "🔐 크롬 프로필 상태:"
+        ls -la chrome_profile/
+        
+        # 프로필 권한 한번 더 확인
+        chmod -R 777 chrome_profile
+        
+        # 실행
         xvfb-run --server-args="-screen 0 1920x1080x24" \
           --auto-servernum \
           python run_band_poster.py
