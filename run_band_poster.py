@@ -14,118 +14,198 @@ import requests
 from bs4 import BeautifulSoup
 
 def setup_driver():
-    try:
-        print("\n=== Chrome 드라이버 설정 시작 ===")
-        options = Options()
-        
-        # chrome_profile 경로 설정
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        profile_path = os.path.join(script_dir, 'chrome_profile')
-        
-        # chrome_profile 폴더가 없으면 오류 발생
-        if not os.path.exists(profile_path):
-            raise Exception("chrome_profile 폴더가 필요합니다. 로그인된 프로필을 먼저 준비해주세요.")
-        
-        print(f"[1/4] Chrome 프로필 경로: {profile_path}")
+    options = Options()
+    options.add_argument('--headless')
+    options.add_argument('--no-sandbox')
+    options.add_argument('--disable-dev-shm-usage')
+    
+    # Chrome 프로필 설정
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    profile_path = os.path.join(script_dir, 'chrome_profile')
+    if os.path.exists(profile_path):
         options.add_argument(f'--user-data-dir={profile_path}')
-        options.add_argument('--profile-directory=Default')
-        
-        # 기본 옵션 설정
-        options.add_argument('--no-sandbox')
-        options.add_argument('--disable-dev-shm-usage')
-        options.add_argument('--disable-gpu')
-        options.add_argument('--disable-extensions')
-        options.add_argument('--window-size=1920,1080')
-        
-        print("[2/4] Chrome 드라이버 초기화 중...")
-        service = Service()
-        driver = webdriver.Chrome(service=service, options=options)
-        
-        print("[3/4] 밴드 페이지 로딩 테스트...")
-        driver.get('https://band.us/home')  # /home으로 변경
-        time.sleep(5)
-        
-        print(f"[4/4] 현재 URL: {driver.current_url}")
-        # 로그인 상태 확인
-        if not driver.current_url.startswith('https://band.us/home'):
-            raise Exception("로그인되지 않은 상태입니다. chrome_profile에 로그인 정보가 저장되어 있는지 확인해주세요.")
-        
-        print("✓ 프로필 로드 및 로그인 확인 성공!")
-        return driver
-
-    except Exception as e:
-        print(f"\n[오류] Chrome 드라이버 설정 실패: {str(e)}")
-        raise
+        print("Chrome profile loaded")
+    
+    service = Service()
+    driver = webdriver.Chrome(service=service, options=options)
+    
+    # 저장된 쿠키 로드
+    cookies_path = os.path.join(script_dir, 'band_cookies.json')
+    if os.path.exists(cookies_path):
+        driver.get('https://band.us')
+        with open(cookies_path, 'r', encoding='utf-8') as f:
+            cookies = json.load(f)
+            for cookie in cookies:
+                try:
+                    driver.add_cookie(cookie)
+                except:
+                    continue
+        print("Cookies loaded")
+        driver.refresh()
+    
+    return driver
 
 def get_url_content(url):
     try:
+        print(f"\n=== URL 콘텐츠 가져오기 시작 ===")
+        print(f"요청 URL: {url}")
+        
         response = requests.get(url)
+        print(f"상태 코드: {response.status_code}")
+        print(f"응답 크기: {len(response.content)} bytes")
+        print(f"콘텐츠 타입: {response.headers.get('content-type', '알 수 없음')}")
+        
         soup = BeautifulSoup(response.content, 'html.parser')
         
         # meta 태그에서 description 추출
         description = soup.find('meta', {'name': 'description'})
-        if (description):
-            return description.get('content', '')
+        if description:
+            content = description.get('content', '')
+            print(f"메타 설명 발견 (길이: {len(content)})")
+            return content
         
         # 본문 텍스트 추출
         paragraphs = soup.find_all('p')
         content = ' '.join([p.get_text() for p in paragraphs])
-        return content.strip()
+        content = content.strip()
+        print(f"본문 텍스트 추출 (길이: {len(content)})")
         
+        if not content:
+            print("⚠️ 경고: 추출된 콘텐츠가 없습니다. URL을 그대로 반환합니다.")
+            return url
+            
+        return content
+        
+    except requests.exceptions.RequestException as e:
+        print(f"❌ URL 요청 실패: {str(e)}")
+        print(f"에러 타입: {type(e).__name__}")
+        if hasattr(e, 'response') and e.response:
+            print(f"응답 상태 코드: {e.response.status_code}")
+            print(f"응답 헤더: {dict(e.response.headers)}")
+        return url
     except Exception as e:
-        print(f"URL 내용 가져오기 실패: {str(e)}")
+        print(f"❌ 콘텐츠 처리 실패: {str(e)}")
+        print(f"에러 타입: {type(e).__name__}")
         return url
 
-def post_to_band(driver, config, band_info, step=1):
+def login(driver, config):
     try:
-        print(f"\n=== [{step}단계] 밴드 '{band_info['name']}' 포스팅 시작 ===")
+        print("\n=== 로그인 시도 중 ===")
+        driver.get('https://auth.band.us/login')
+        print("로그인 페이지 로드됨")
+        time.sleep(3)
         
-        print(f"[{step}.1] 밴드 페이지로 이동: {band_info['url']}")
-        driver.get(band_info['url'])
-        time.sleep(5)
-        print(f"[{step}.1] ✓ 현재 URL: {driver.current_url}")
+        # 이메일 로그인 버튼 클릭
+        email_login_btn = WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.CSS_SELECTOR, '.uButtonRound.-h56.-icoType.-email'))
+        )
+        email_login_btn.click()
+        print("이메일 로그인 버튼 클릭됨")
         
-        print(f"[단계 {step}] 밴드 '{band_info['name']}' 포스팅 시작")
+        # 이메일 입력
+        email_input = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.ID, 'input_email'))
+        )
+        email_input.send_keys(config['email'])
+        print(f"이메일 입력됨: {config['email'][:3]}***@***")
+        
+        email_confirm_btn = WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.CSS_SELECTOR, '.uBtn.-tcType.-confirm'))
+        )
+        email_confirm_btn.click()
+        print("이메일 확인 버튼 클릭됨")
+        
+        # 비밀번호 입력
+        pw_input = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.ID, 'pw'))
+        )
+        pw_input.send_keys(config['password'])
+        print("비밀번호 입력됨")
+        
+        pw_confirm_btn = WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.CSS_SELECTOR, '.uBtn.-tcType.-confirm'))
+        )
+        pw_confirm_btn.click()
+        print("비밀번호 확인 버튼 클릭됨")
+        
+        # 2차 인증 처리
+        try:
+            verification_input = WebDriverWait(driver, 5).until(
+                EC.presence_of_element_located((By.ID, 'code'))
+            )
+            print("\n=== 2차 인증 필요 ===")
+            verification_code = input("이메일로 받은 인증 코드를 입력해주세요: ")
+            verification_input.send_keys(verification_code)
+            print("인증 코드 입력됨")
+            
+            verify_btn = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.CSS_SELECTOR, '.uBtn.-tcType.-confirm'))
+            )
+            verify_btn.click()
+            print("인증 코드 확인 버튼 클릭됨")
+            time.sleep(5)
+        except:
+            print("2차 인증 없음 - 로그인 진행")
+        
+        # 로그인 성공 후 메인 페이지 로딩 대기
+        WebDriverWait(driver, 30).until(
+            EC.url_to_be("https://band.us/")
+        )
+        print("\n✅ 로그인 성공!")
+        
+    except Exception as e:
+        print(f"\n❌ 로그인 실패: {str(e)}")
+        raise e
+
+def post_to_band(driver, config, band_info):
+    try:
+        print(f"\n=== '{band_info['name']}' 밴드에 포스팅 시도 중 ===")
         # 밴드로 이동
         driver.get(band_info['url'])
-        print(f"[단계 {step}.1] 밴드 페이지 로딩 중...")
+        print(f"밴드 페이지 로드됨: {band_info['url']}")
         time.sleep(5)
         
-        print(f"[단계 {step}.2] 글쓰기 버튼 찾는 중...")
+        # 글쓰기 버튼 찾기
         write_btn = WebDriverWait(driver, 10).until(
             EC.element_to_be_clickable((By.CSS_SELECTOR, 'button._btnPostWrite'))
         )
-        print(f"[단계 {step}.3] 글쓰기 버튼 클릭")
+        print("글쓰기 버튼 발견")
         driver.execute_script("arguments[0].click();", write_btn)
         time.sleep(2)
+        print("글쓰기 버튼 클릭됨")
         
-        print(f"[단계 {step}.4] 에디터 로딩 대기 중...")
+        # 글 작성
         editor = WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, 'div[contenteditable="true"]'))
         )
+        print("에디터 찾음")
         
-        print(f"[단계 {step}.5] URL 콘텐츠 가져오는 중...")
+        # 포스팅 URL의 내용 가져오기
         post_url = config['post_url']
         content = get_url_content(post_url)
+        print(f"포스팅 URL 콘텐츠 가져옴: {post_url}")
         
-        print(f"[단계 {step}.6] 제목 입력 중...")
+        # 제목 입력
         title = config['title']
         if (title):
             editor.send_keys(title)
             ActionChains(driver).send_keys(Keys.ENTER).perform()
             time.sleep(1)
+            print(f"제목 입력됨: {title}")
         
-        print(f"[단계 {step}.7] URL 입력 중...")
+        # URL 입력
         editor.click()
         editor.clear()
         editor.send_keys(post_url)
         time.sleep(1)
+        print("URL 입력됨")
         
-        print(f"[단계 {step}.8] 미리보기 로딩 대기 중...")
         ActionChains(driver).send_keys(Keys.ENTER).perform()
-        time.sleep(7)
+        print("URL 미리보기 로딩 중... (10초)")
+        time.sleep(10)
+        print("URL 미리보기 로딩 완료")
         
-        print(f"[단계 {step}.9] URL 텍스트 정리 중...")
+        # URL 텍스트 삭제
         editor.click()
         driver.execute_script("""
             var editor = arguments[0];
@@ -135,31 +215,69 @@ def post_to_band(driver, config, band_info, step=1):
             editor.innerHTML = editor.innerHTML.trim();
             editor.dispatchEvent(new Event('input', { bubbles: true }));
         """, editor, post_url)
+        print("URL 텍스트 삭제됨")
         
-        print(f"[단계 {step}.10] 게시 버튼 클릭...")
+        # 게시 버튼 클릭
         submit_btn = WebDriverWait(driver, 5).until(
             EC.element_to_be_clickable((By.CSS_SELECTOR, 'button.uButton.-sizeM._btnSubmitPost.-confirm'))
         )
         time.sleep(3)
         submit_btn.click()
-        print(f"[단계 {step}.11] 게시 완료 대기 중...")
+
+        # 게시판 선택 팝업 처리
+        try:
+            # 팝업 헤더 확인
+            popup_header = WebDriverWait(driver, 5).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, 'header.modalHeader'))
+            )
+            
+            if "게시판 선택" in popup_header.text:
+                print("게시판 선택 팝업 감지됨")
+                
+                # 첫 번째 flexList 요소 찾기 및 클릭
+                first_flex_list = WebDriverWait(driver, 5).until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR, 'label.flexList'))
+                )
+                first_flex_list.click()
+                print("첫 번째 게시판 선택됨")
+                
+                # 확인 버튼 클릭
+                confirm_btn = WebDriverWait(driver, 5).until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR, 'button.uButton.-confirm._btnConfirm'))
+                )
+                confirm_btn.click()
+                print("게시판 선택 확인")
+                
+                # 최종 게시 버튼 클릭
+                final_submit_btn = WebDriverWait(driver, 5).until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR, 'button.uButton.-sizeM._btnSubmitPost.-confirm'))
+                )
+                time.sleep(2)
+                final_submit_btn.click()
+                print("최종 게시 완료")
+        except Exception as e:
+            print(f"게시판 선택 처리 중 오류 (무시됨): {str(e)}")
+
         time.sleep(3)
-        
-        print(f"[단계 {step}] 포스팅 완료!")
         return True
         
     except Exception as e:
-        print(f"[단계 {step}] 포스팅 실패: {str(e)}")
+        print(f"\n❌ '{band_info['name']}' 밴드 포스팅 실패: {str(e)}")
         return False
 
 def normal_posting_process(driver, config):
     """일반적인 포스팅 프로세스"""
     try:
-        print("\n[단계 1] 밴드 목록 페이지로 이동 중...")
+        print("\n=== 포스팅 프로세스 시작 ===")
+        # 로그인
+        login(driver, config)
+        
+        # 밴드 목록 가져오기
+        print("\n=== 밴드 목록 수집 중 ===")
         driver.get('https://band.us/feed')
+        print("피드 페이지 로드됨")
         time.sleep(3)
 
-        print("[단계 2] 밴드 목록 로딩 중...")
         # "내 밴드 더보기" 버튼을 찾아서 클릭
         try:
             more_btn = WebDriverWait(driver, 10).until(
@@ -167,6 +285,7 @@ def normal_posting_process(driver, config):
             )
             print("'내 밴드 더보기' 버튼 발견")
             driver.execute_script("arguments[0].click();", more_btn)
+            print("'내 밴드 더보기' 버튼 클릭됨")
             time.sleep(2)  # 밴드 목록이 로드될 때까지 대기
         except Exception as e:
             print("'내 밴드 더보기' 버튼을 찾을 수 없거나 이미 모든 밴드가 표시되어 있습니다.")
@@ -198,8 +317,8 @@ def normal_posting_process(driver, config):
         band_elements.sort(key=lambda x: int(x['url'].split('/')[-1]), reverse=True)
         
         total = len(band_elements)
-        print(f"[단계 4] 총 {total}개의 밴드 발견")
         if (total > 0):
+            print(f"총 {total}개의 밴드를 찾았습니다.")
             print(f"첫 번째 밴드: {band_elements[0]['name']} ({band_elements[0]['url']})")
             print(f"마지막 밴드: {band_elements[-1]['name']} ({band_elements[-1]['url']})")
         else:
@@ -208,41 +327,76 @@ def normal_posting_process(driver, config):
 
         # 각 밴드에 글 작성
         success_count = 0
-        for idx, band_info in enumerate(band_elements, 1):
-            print(f"\n=== 밴드 {idx}/{len(band_elements)} 처리 중 ===")
-            if post_to_band(driver, config, band_info, step=idx+4):
+        for i, band_info in enumerate(band_elements, 1):
+            print(f"\n=== 밴드 {i}/{total} 진행 중 ===")
+            if post_to_band(driver, config, band_info):
                 success_count += 1
             time.sleep(10)  # 각 밴드 간 대기 시간
         
-        print(f"\n[최종 단계] 작업 완료 (성공: {success_count}, 실패: {total - success_count})")
+        print(f"\n=== 최종 결과 ===")
+        print(f"✅ 성공: {success_count}개")
+        print(f"❌ 실패: {total - success_count}개")
+        print(f"총 밴드 수: {total}개")
+        print("=== 포스팅 프로세스 완료 ===\n")
         return 0
         
     except Exception as e:
-        print(f"\n[오류] 프로세스 실패: {str(e)}")
+        print(f"\n❌ 포스팅 프로세스 실패: {str(e)}")
         return 1
 
 def main():
-    print("\n=== 밴드 자동 포스팅 시작 ===")
     try:
-        # 설정 로드
-        print("[1/3] 설정 파일 로드 중...")
+        print("===== 밴드 자동 포스팅 시작 =====")
+        print("\n1. 설정 및 인증 데이터 로드 중...")
         with open('config.json', 'r', encoding='utf-8') as f:
             config = json.load(f)
+            
+        # 밴드 URL 목록 로드
+        if os.path.exists('band_urls.json'):
+            with open('band_urls.json', 'r', encoding='utf-8') as f:
+                config['bands'] = json.load(f)
+                print(f"밴드 URL 로드 완료: {len(config['bands'])}개")
+
+        print(f"이메일: {config['email'][:3]}***")
+        print(f"URL: {config['post_url']}")
+        print(f"제목: {config['title']}")
         
-        # Chrome 드라이버 설정
-        print("\n[2/3] Chrome 드라이버 설정 중...")
-        driver = setup_driver()
+        print("\n2. Chrome 드라이버 설정 중...")
         
-        # 포스팅 프로세스 시작
-        print("\n[3/3] 포스팅 프로세스 시작...")
+        # Chrome 프로필 경로 설정 (밴드 폴더 사용)
+        profile_path = os.path.abspath(os.path.join('밴드', 'chrome_profile'))
+        print(f"Chrome 프로필 경로: {profile_path}")
+        
+        if not os.path.exists(profile_path):
+            print("⚠️ chrome_profile 폴더가 없습니다.")
+            print("band_auto_poster.py를 실행하여 로그인 세션을 생성해주세요.")
+            return 1
+            
+        options = Options()
+        options.add_argument(f'--user-data-dir={profile_path}')
+        options.add_argument('--profile-directory=Default')
+        # headless 모드 제거
+        options.add_argument('--no-sandbox')
+        options.add_argument('--disable-dev-shm-usage')
+        options.add_argument('--window-size=1920,1080')
+        options.add_argument('--disable-gpu')
+        options.add_argument('--disable-extensions')
+        options.add_argument('--disable-infobars')
+        options.add_argument('--remote-debugging-port=9222')
+        options.add_argument('--ignore-certificate-errors')  # SSL 인증서 검증 비활성화
+        
+        driver = webdriver.Chrome(options=options)
+        print("Chrome 드라이버 시작됨 (기존 프로필 사용)")
+        
         try:
             return normal_posting_process(driver, config)
+            
         finally:
             print("\n브라우저 종료")
             driver.quit()
             
     except Exception as e:
-        print(f"\n치명적 오류: {str(e)}")
+        print(f"\n❌ 치명적 오류 발생: {str(e)}")
         return 1
 
 if __name__ == "__main__":
