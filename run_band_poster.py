@@ -88,11 +88,18 @@ def get_url_content(url):
         print(f"에러 타입: {type(e).__name__}")
         return url
 
+def log_step(driver, step_name):
+    """현재 단계와 URL을 로깅하는 함수"""
+    current_url = driver.current_url
+    print(f"\n📍 단계: {step_name}")
+    print(f"🔗 현재 URL: {current_url}")
+
 def login(driver, config):
     try:
-        print("\n=== 로그인 시도 중 ===")
+        log_step(driver, "로그인 시작")
+        
         driver.get('https://auth.band.us/login')
-        print("로그인 페이지 로드됨")
+        log_step(driver, "로그인 페이지 접속")
         time.sleep(3)
         
         # 이메일 로그인 버튼 클릭
@@ -151,18 +158,21 @@ def login(driver, config):
         WebDriverWait(driver, 30).until(
             EC.url_to_be("https://band.us/")
         )
+        log_step(driver, "로그인 완료")
         print("\n✅ 로그인 성공!")
         
     except Exception as e:
+        log_step(driver, "로그인 실패 지점")
         print(f"\n❌ 로그인 실패: {str(e)}")
         raise e
 
 def post_to_band(driver, config, band_info):
     try:
         print(f"\n=== '{band_info['name']}' 밴드에 포스팅 시도 중 ===")
-        # 밴드로 이동
+        
+        log_step(driver, f"'{band_info['name']}' 밴드 포스팅 시작")
         driver.get(band_info['url'])
-        print(f"밴드 페이지 로드됨: {band_info['url']}")
+        log_step(driver, f"'{band_info['name']}' 밴드 페이지 진입")
         time.sleep(5)
         
         # 글쓰기 버튼 찾기
@@ -258,24 +268,27 @@ def post_to_band(driver, config, band_info):
         except Exception as e:
             print(f"게시판 선택 처리 중 오류 (무시됨): {str(e)}")
 
+        log_step(driver, "포스팅 완료")
         time.sleep(3)
         return True
         
     except Exception as e:
+        log_step(driver, "포스팅 실패 지점")
         print(f"\n❌ '{band_info['name']}' 밴드 포스팅 실패: {str(e)}")
         return False
 
 def normal_posting_process(driver, config):
     """일반적인 포스팅 프로세스"""
     try:
-        print("\n=== 포스팅 프로세스 시작 ===")
+        log_step(driver, "프로세스 시작")
+        
         # 로그인
         login(driver, config)
         
         # 밴드 목록 가져오기
         print("\n=== 밴드 목록 수집 중 ===")
         driver.get('https://band.us/feed')
-        print("피드 페이지 로드됨")
+        log_step(driver, "피드 페이지 접속")
         time.sleep(3)
 
         # "내 밴드 더보기" 버튼을 찾아서 클릭
@@ -329,10 +342,13 @@ def normal_posting_process(driver, config):
         success_count = 0
         for i, band_info in enumerate(band_elements, 1):
             print(f"\n=== 밴드 {i}/{total} 진행 중 ===")
+            log_step(driver, f"밴드 {i} - {band_info['name']} 시작")
             if post_to_band(driver, config, band_info):
                 success_count += 1
+            log_step(driver, f"밴드 {i} - {band_info['name']} 완료")
             time.sleep(10)  # 각 밴드 간 대기 시간
         
+        log_step(driver, "전체 프로세스 완료")
         print(f"\n=== 최종 결과 ===")
         print(f"✅ 성공: {success_count}개")
         print(f"❌ 실패: {total - success_count}개")
